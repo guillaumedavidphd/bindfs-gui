@@ -2,7 +2,7 @@
 Type=Application
 Name=BindFS Mounts
 Comment=Create and manage bindfs bind-mounts
-Exec=/home/gdavid/Documents/Code/BindFS-GUI/bindfs-gui
+Exec=bindfs-gui
 Icon=folder-blue-sync
 Terminal=false
 Categories=Utility;System;
