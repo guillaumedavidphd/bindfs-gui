@@ -37,11 +37,14 @@ lacks PyGObject.
 To get it in your app launcher:
 
 ```
-cp bindfs-gui.desktop ~/.local/share/applications/
+./install.sh
 ```
 
-`bindfs-gui.desktop`'s `Exec=` is an absolute path to this checkout, so the
-launcher keeps working from wherever it's installed.
+This symlinks `bindfs-gui` into `~/.local/bin` and copies `bindfs-gui.desktop`
+into `~/.local/share/applications/`. The `.desktop` file's `Exec=` is just
+`bindfs-gui` (resolved via `PATH`, already includes `~/.local/bin` on
+Ubuntu) — it carries no machine-specific path, so it works from any clone
+without editing. Re-run `install.sh` if you move this checkout.
 
 ## How it works
 
