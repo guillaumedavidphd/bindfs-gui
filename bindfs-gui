@@ -11,7 +11,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from bindfs_gui.app import main
+
+def _dispatch_cli() -> int | None:
+    """Handle non-GUI invocations (e.g. from a systemd OnFailure= unit)
+    without importing GTK. Returns an exit code if handled, else None."""
+    if len(sys.argv) >= 3 and sys.argv[1] == "--notify-mount-failure":
+        from bindfs_gui.persistence import notify_failure
+        notify_failure(sys.argv[2])
+        return 0
+    return None
+
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = _dispatch_cli()
+    if exit_code is None:
+        from bindfs_gui.app import main
+        exit_code = main()
+    raise SystemExit(exit_code)
