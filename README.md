@@ -12,6 +12,7 @@ folder at another path as your own user — no `sudo`, no `pkexec`, no
 - Read-only toggle (`-o ro`) and a free-form field for extra bindfs flags
   (`--perms`, `--map`, ...). Flags containing `allow_other` are rejected.
 - Re-mount, unmount, or delete any history entry with one click.
+- "Mount at login" toggle per entry, so it survives a reboot.
 - Refresh button re-scans the system for active bindfs mounts.
 
 ## Requirements
@@ -55,6 +56,7 @@ without editing. Re-run `install.sh` if you move this checkout.
 | `bindfs_gui/window.py` | The window: new-mount form + merged mount list. |
 | `bindfs_gui/app.py` | `Adw.Application` bootstrap. |
 | `bindfs_gui/models.py` | `HistoryEntry` / `ActiveMount` dataclasses. |
+| `bindfs_gui/persistence.py` | Generates/enables/disables the systemd `--user` unit behind "Mount at login". |
 
 **Active-mount detection**: `findmnt -t fuse.bindfs` doesn't work on every
 system — some bindfs builds mount as plain `fuse` with no distinguishing
@@ -69,12 +71,28 @@ not to, which would require `user_allow_other` in `/etc/fuse.conf`. Every
 mount call passes `--no-allow-other` explicitly so this app never depends
 on that system file, on any machine.
 
+**Mount at login**: there's no sudo-free way to mount before you log in
+(that needs `/etc/fstab` or a system-level systemd unit). Flipping the
+toggle on a history entry instead writes a `systemd --user` unit —
+`~/.config/systemd/user/bindfs-gui-mount-<entry-id>.service`, `WantedBy=
+default.target` — the same mechanism a hand-written user unit would use,
+so it starts the next time you log into a graphical session. It runs
+`bindfs --no-allow-other` directly as `ExecStart`, and `fusermount3 -u` as
+`ExecStop`, with `RemainAfterExit=yes` (bindfs daemonizes, so the direct
+child exiting 0 isn't a failure) and `Restart=on-failure` (capped at 2
+tries per 30s). Every such unit's `OnFailure=` points at a shared oneshot
+template, `bindfs-gui-mount-failed@.service`, which fires a `notify-send`
+desktop notification — so a source that's missing or not ready yet at
+login surfaces instead of silently not being there. Flipping the toggle
+only registers or deregisters the unit; it doesn't mount or unmount
+anything immediately.
+
 ## History file
 
 `~/.local/share/bindfs-gui/history.json` — one entry per (source, target)
-pair: `source`, `target`, `read_only`, `advanced_flags`, `last_used`, `id`.
-Mounting again with the same source/target updates the existing entry
-instead of duplicating it.
+pair: `source`, `target`, `read_only`, `advanced_flags`, `last_used`,
+`mount_at_login`, `id`. Mounting again with the same source/target updates
+the existing entry instead of duplicating it.
 
 ## Icon
 
