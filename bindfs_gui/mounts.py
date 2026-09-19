@@ -117,13 +117,7 @@ def list_active_mounts() -> list[ActiveMount]:
     return active
 
 
-def _validate_mount_request(source: str, target: str, advanced_flags: str) -> list[str]:
-    if not os.path.isdir(source):
-        raise ValidationError(f"Source is not a directory: {source}")
-    if not os.path.isdir(target):
-        raise ValidationError(f"Target is not a directory: {target}")
-    if os.path.ismount(target):
-        raise ValidationError(f"Target is already a mount point: {target}")
+def _parse_advanced_flags(advanced_flags: str) -> list[str]:
     if "allow_other" in advanced_flags.lower():
         raise ValidationError(
             "Advanced flags may not include allow_other -- this app never "
@@ -135,9 +129,9 @@ def _validate_mount_request(source: str, target: str, advanced_flags: str) -> li
         raise ValidationError(f"Could not parse advanced flags: {exc}") from exc
 
 
-def do_mount(source: str, target: str, read_only: bool, advanced_flags: str) -> None:
-    extra_args = _validate_mount_request(source, target, advanced_flags)
-
+def build_mount_argv(source: str, target: str, read_only: bool, advanced_flags: str) -> list[str]:
+    """The bindfs argv for this source/target/options. Used both to mount
+    directly and to build a persistent (mount-at-login) unit's ExecStart."""
     bindfs_bin = find_bindfs()
     if not bindfs_bin:
         raise MountError("bindfs is not installed (checked PATH and /usr/bin).")
@@ -145,9 +139,20 @@ def do_mount(source: str, target: str, read_only: bool, advanced_flags: str) -> 
     argv = [bindfs_bin, "--no-allow-other"]
     if read_only:
         argv += ["-o", "ro"]
-    argv += extra_args
+    argv += _parse_advanced_flags(advanced_flags)
     argv += [source, target]
+    return argv
 
+
+def do_mount(source: str, target: str, read_only: bool, advanced_flags: str) -> None:
+    if not os.path.isdir(source):
+        raise ValidationError(f"Source is not a directory: {source}")
+    if not os.path.isdir(target):
+        raise ValidationError(f"Target is not a directory: {target}")
+    if os.path.ismount(target):
+        raise ValidationError(f"Target is already a mount point: {target}")
+
+    argv = build_mount_argv(source, target, read_only, advanced_flags)
     result = subprocess.run(argv, capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT_S)
     if result.returncode != 0:
         raise MountError(result.stderr.strip() or result.stdout.strip() or

@@ -13,6 +13,7 @@ class HistoryEntry:
     read_only: bool = False
     advanced_flags: str = ""
     last_used: str = ""
+    mount_at_login: bool = False
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def to_json(self) -> dict:
@@ -23,6 +24,7 @@ class HistoryEntry:
             "read_only": self.read_only,
             "advanced_flags": self.advanced_flags,
             "last_used": self.last_used,
+            "mount_at_login": self.mount_at_login,
         }
 
     @staticmethod
@@ -34,6 +36,7 @@ class HistoryEntry:
             read_only=bool(data.get("read_only", False)),
             advanced_flags=data.get("advanced_flags", ""),
             last_used=data.get("last_used", ""),
+            mount_at_login=bool(data.get("mount_at_login", False)),
         )
 
 

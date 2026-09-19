@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, GLib
 
-from . import history, mounts
+from . import history, mounts, persistence
 from .models import ActiveMount, HistoryEntry
 
 _ACTIVE_KNOWN = "active_known"
@@ -206,6 +206,23 @@ class MainWindow(Adw.ApplicationWindow):
         self._toast("Deleted")
         self.refresh()
 
+    def _on_mount_at_login_toggled(self, switch: Gtk.Switch, requested: bool,
+                                    entry: HistoryEntry) -> bool:
+        try:
+            if requested:
+                persistence.enable(entry)
+            else:
+                persistence.disable(entry.id)
+        except Exception as exc:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._show_error("Could not update login persistence", str(exc))
+            return True  # leave the switch showing its previous (unconfirmed) state
+
+        entry.mount_at_login = requested
+        history.save_history(self._history)
+        switch.set_state(requested)
+        self._toast("Will mount at login" if requested else "Removed from login mounts")
+        return True
+
     # -- Background work / feedback helpers ----------------------------------
 
     def _run_async(self, work, done) -> None:
@@ -291,8 +308,11 @@ class MainWindow(Adw.ApplicationWindow):
         dot.add_css_class("inactive" if state == _INACTIVE else "active")
         row.add_prefix(dot)
 
+        login_suffix = " · mounts at login" if entry and entry.mount_at_login else ""
+
         if state == _ACTIVE_KNOWN:
-            row.set_subtitle(f"{source} · {mode} · mounted")
+            row.set_subtitle(f"{source} · {mode} · mounted{login_suffix}")
+            self._add_login_switch(row, entry)
             unmount_button = Gtk.Button(label="Unmount", valign=Gtk.Align.CENTER)
             unmount_button.connect("clicked", lambda _b: self._on_unmount_clicked(target))
             row.add_suffix(unmount_button)
@@ -305,7 +325,8 @@ class MainWindow(Adw.ApplicationWindow):
             unmount_button.connect("clicked", lambda _b: self._on_unmount_clicked(target))
             row.add_suffix(unmount_button)
         else:
-            row.set_subtitle(f"{source} · {mode} · not mounted")
+            row.set_subtitle(f"{source} · {mode} · not mounted{login_suffix}")
+            self._add_login_switch(row, entry)
             mount_button = Gtk.Button(label="Mount", valign=Gtk.Align.CENTER)
             mount_button.connect("clicked", lambda _b: self._remount_entry(entry))
             row.add_suffix(mount_button)
@@ -315,3 +336,10 @@ class MainWindow(Adw.ApplicationWindow):
             row.add_suffix(delete_button)
 
         return row
+
+    def _add_login_switch(self, row: Adw.ActionRow, entry: HistoryEntry) -> None:
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER, tooltip_text="Mount at login")
+        switch.set_active(entry.mount_at_login)
+        switch.set_state(entry.mount_at_login)
+        switch.connect("state-set", self._on_mount_at_login_toggled, entry)
+        row.add_suffix(switch)
