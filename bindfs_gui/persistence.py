@@ -14,13 +14,14 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from . import mounts
+from . import history, mounts
 from .models import HistoryEntry
 
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 _UNIT_PREFIX = "bindfs-gui-mount-"
 _FAILURE_TEMPLATE_NAME = "bindfs-gui-mount-failed@"
 _SYSTEMCTL_TIMEOUT_S = 15
+_LAUNCHER_PATH = Path(__file__).resolve().parent.parent / "bindfs-gui"
 
 
 class PersistenceError(Exception):
@@ -52,20 +53,47 @@ def _quote(argv: list[str]) -> str:
 
 
 def _ensure_failure_notifier() -> None:
-    path = SYSTEMD_USER_DIR / f"{_FAILURE_TEMPLATE_NAME}.service"
-    if path.exists():
-        return
-    SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    """The shared template every persisted unit's OnFailure= points at. It
+    shells back out to this app (--notify-mount-failure %i) rather than
+    calling notify-send directly, so the notification can show the mount's
+    actual source/target instead of the raw, doubly-suffixed unit name
+    (bindfs-gui-mount-<id>.service.service) that %i alone expands to."""
+    content = (
         "[Unit]\n"
         "Description=Notify that %i failed to mount\n"
         "\n"
         "[Service]\n"
         "Type=oneshot\n"
-        'ExecStart=/usr/bin/notify-send -u critical "BindFS mount failed" '
-        '"%i did not come back. Open BindFS Mounts to check it."\n'
+        f"ExecStart={_quote([str(_LAUNCHER_PATH), '--notify-mount-failure', '%i'])}\n"
     )
+    path = SYSTEMD_USER_DIR / f"{_FAILURE_TEMPLATE_NAME}.service"
+    if path.exists() and path.read_text() == content:
+        return
+    SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
     _run_systemctl("daemon-reload")
+
+
+def _entry_id_from_unit(unit: str) -> str:
+    name = unit
+    if name.startswith(_UNIT_PREFIX):
+        name = name[len(_UNIT_PREFIX):]
+    if name.endswith(".service"):
+        name = name[: -len(".service")]
+    return name
+
+
+def notify_failure(failed_unit: str) -> None:
+    """Invoked by the shared failure-notifier unit with the full name of
+    the mount unit that failed (systemd's %i, e.g.
+    'bindfs-gui-mount-<id>.service.service' -- see OnFailure= in enable())."""
+    entry = next((e for e in history.load_history() if e.id == _entry_id_from_unit(failed_unit)), None)
+    if entry is not None:
+        body = f"{entry.target} (from {entry.source}) didn't come back. Open BindFS Mounts to check it."
+    else:
+        body = f"{failed_unit} didn't come back. Open BindFS Mounts to check it."
+    subprocess.run(["notify-send", "-u", "critical", "BindFS mount failed", body],
+                    capture_output=True, text=True, timeout=_SYSTEMCTL_TIMEOUT_S)
 
 
 def enable(entry: HistoryEntry) -> None:
